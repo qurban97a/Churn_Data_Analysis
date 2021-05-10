@@ -15,7 +15,6 @@ raw <- read.csv("Churn_Modelling (1).csv")
 raw %>% view
 
 names(raw)
-raw <- raw %>% select(-RowNumber,-CustomerId,-Surname)
 raw %>% glimpse()
 
 fNdistinct(raw)
@@ -24,11 +23,21 @@ raw %>% skim()
 
 raw$Exited  %>% table() %>% prop.table() %>% round(2)
 
+
 raw %>% inspect_na()
 
-df.num <- raw %>% select_if(is.numeric)
+# Bizde burda $HasCrCard, $IsActiveMember sutunlari eslinde labelli sutunlardi deye bunlari once ceviririk factora
+df <- raw %>% select(-RowNumber,-CustomerId,-Surname)
+df$Exited <- df$Exited %>% as.factor()
+df$HasCrCard <- df$HasCrCard %>% as.factor()
+df$IsActiveMember <- df$IsActiveMember %>% as.factor()
 
-df.chr <- raw %>% select_if(is.character)
+df.num <- df %>% select_if(is.numeric)
+
+df.chr <- df %>%
+  mutate_if(is.character,as.factor) %>% 
+  select_if(is.factor) %>% 
+  select(Exited,everything())
 
 #Changing outliers
 num_vars <- df.num %>% names()
@@ -61,16 +70,15 @@ for (o in for_vars) {
 
 # One Hote Encoding
 
-ohe <- dummyVars(" ~ .", data = df.chr) %>% 
-  predict(newdata = df.chr) %>% 
+ohe <- dummyVars(" ~ .", data = df.chr[,-1]) %>% 
+  predict(newdata = df.chr[,-1]) %>% 
   as.data.frame()
+ohe %>% glimpse()
+df <- cbind(df.chr[1],ohe,df.num) 
 
 ohe %>% view()
 
-df <- cbind(df.chr,ohe,df.num)
-
-df <- df %>% select(Exited,everything())
-df %>% view()
+df %>% glimpse()
 
 
 names(df)
@@ -81,7 +89,6 @@ names(df)
 # Weight Of Evidence ----
 
 # IV (information values) 
-
 iv <- df %>% 
   iv(y = 'Exited') %>% as_tibble() %>%
   mutate(info_value = round(info_value, 3)) %>%
@@ -208,22 +215,19 @@ h2o.varimp(model) %>% as.data.frame() %>% .[.$percentage != 0,] %>%
 pred <- model %>% h2o.predict(newdata = test_h2o) %>% 
   as.data.frame() %>% select(p1,predict)
 
-names(pred)[1] <- "Predictet"
-names(pred)[2] <- "Actual"
-pred %>% view()
+model %>% h2o.confusionMatrix(newdata = test_h2o)
 
 model %>% h2o.performance(newdata = test_h2o) %>%
   h2o.find_threshold_by_max_metric('f1')
 
 eva <- perf_eva(
-  pred = pred %>% pull(Predictet),
-  label = dt_list$test$creditability %>% as.character() %>% as.numeric(),
+  pred = pred %>% pull(p1),
+  label = dt_list$test$Exited %>% as.character() %>% as.numeric(),
   binomial_metric = c("auc","gini"),
   show_plot = "roc")
 
-eva$confusion_matrix$dat
+eva$binomial_metric$dat
 
-# Check overfitting ----
 model %>%
   h2o.auc(train = T,
           valid = T,
@@ -233,8 +237,3 @@ model %>%
   mutate(data = c('train','test','cross_val')) %>%
   mutate(gini = 2*value-1) %>%
   select(data,auc=value,gini)
-
-
-pred %>% view()
-
-
